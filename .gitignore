@@ -1,0 +1,10 @@
+node_modules/
+.next/
+package-lock.json
+.env
+*.log
+.DS_Store
+backend/data/snapshots/*
+!backend/data/snapshots/.gitkeep
+tmp/
+temp-specs/

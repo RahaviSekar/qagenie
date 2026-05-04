@@ -1,0 +1,35 @@
+{
+  "flows": [
+    {
+      "id": "flow-9921e7ac-a356-4fc8-bf83-09237219c006",
+      "name": "Register",
+      "steps": [
+        "Go to /login",
+        "you will land in Secure Access page, Enter the password to continue-> give this password FiP93&@1U94L and click continue button",
+        "click Create an Account which is a hyperlink placed under this text \"Login below or \"",
+        "You will land in Find Your Company page,type lamb in Company Name field and click Search Button(this may take upto 2 mins) please wait for the search results",
+        "scroll down to see the search results and click the select button of the 1st result",
+        "Click Confirm & Create Your Account button",
+        "Fill the Personal Information fields - First Name, Last Name, Email Address, Email Confirmation, Phone Number,",
+        "In Account Information section, fill password(Make sure to read the Password Requirements: and fill tjhe password accordingly) , Confirm Password, Select user type and Click Create Account button"
+      ],
+      "lastResult": {
+        "passed": false,
+        "at": "2026-05-04T07:46:52.758Z",
+        "failureSummary": "The page took too long to open or finish loading. — Fill the Personal Information fields - First Name, Last Name, Email Addr…",
+        "reportSummary": {
+          "total": 6,
+          "passedCount": 0,
+          "failedCount": 6,
+          "happyPassed": false,
+          "negativePassed": 0,
+          "negativeFailed": 0,
+          "negativeTotal": 0,
+          "includeNegativeTests": true
+        }
+      },
+      "createdAt": "2026-05-04T04:59:51.112Z",
+      "baseUrl": "https://dev.ges.store"
+    }
+  ]
+}

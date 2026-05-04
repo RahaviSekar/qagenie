@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: 18 18 22;
+  --surface-muted: 28 28 35;
+  --ink: 248 250 252;
+  --ink-muted: 148 163 184;
+  --accent: 99 102 241;
+  --accent-glow: 129 140 248;
+  --border: 255 255 255;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply min-h-screen antialiased text-slate-100 bg-zinc-950;
+  background-image: radial-gradient(ellipse 120% 80% at 50% -30%, rgb(99 102 241 / 0.18), transparent),
+    linear-gradient(180deg, rgb(22 22 28) 0%, rgb(18 18 22) 45%);
+}
+
+/* subtle grid */
+.bg-app-grid {
+  background-image: linear-gradient(rgb(var(--border) / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--border) / 0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
