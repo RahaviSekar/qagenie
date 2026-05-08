@@ -1,8 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const crawler = require("../services/crawler");
-const aiService = require("../services/aiService");
-const { runTestCases } = require("../services/playwrightRunner");
+const { runUrlScan } = require("../services/agentRunner");
 const { log } = require("../services/logEmitter");
 const fs = require("fs").promises;
 const path = require("path");
@@ -32,14 +30,14 @@ router.post("/", async (req, res) => {
     }
 
     log(`URL scan requested: ${normalized}`, "info");
-    const crawled = await crawler.crawl(normalized);
-    const gen = await aiService.generateTestCases(crawled, scope);
-    const testCases = gen.testCases;
-    const results = await runTestCases(testCases.slice(0, 8), normalized);
+    log("Launching MCP browser...", "step");
+    const scanRun = await runUrlScan(normalized);
+    const testCases = scanRun.testCases || [];
+    const results = scanRun.results || [];
     const passed = results.filter((r) => r.passed).length;
     const failed = results.length - passed;
 
-    const run = {
+    const historyRun = {
       id: `run-${uuidv4()}`,
       timestamp: new Date().toISOString(),
       triggeredBy: "url-scan",
@@ -52,16 +50,16 @@ router.post("/", async (req, res) => {
         duration: results.reduce((a, r) => a + (r.duration || 0), 0),
       },
     };
-    await appendRegressionRun(run);
+    await appendRegressionRun(historyRun);
 
     res.json({
       testCases,
       results,
-      summary: run.summary,
-      crawledPages: crawled.pages.length,
-      regressionRunId: run.id,
-      aiSource: gen.source,
-      aiWarning: gen.warning || null,
+      summary: historyRun.summary,
+      crawledPages: null,
+      regressionRunId: historyRun.id,
+      aiSource: "gemini-vision-mcp",
+      aiWarning: null,
     });
   } catch (e) {
     log(String(e.message || e), "error");

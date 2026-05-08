@@ -3,15 +3,13 @@ const router = express.Router();
 const fs = require("fs").promises;
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
-const crawler = require("../services/crawler");
+const mcpBrowser = require("../services/mcpBrowser");
+const { runUrlScan, runFlow } = require("../services/agentRunner");
 const aiService = require("../services/aiService");
-const { runTestCases } = require("../services/playwrightRunner");
-const { runPlaywrightSpec } = require("../services/playwrightCli");
-const { wrapPlaywrightSpec } = require("../services/specWrap");
 const { resolveFlowBaseUrl } = require("../services/flowBaseUrl");
-const { buildFriendlyFailureOrNull, stripAnsi } = require("../services/friendlyRunReport");
 const { log } = require("../services/logEmitter");
 const historyPath = path.join(__dirname, "..", "data", "regressionHistory.json");
+const snapshotsPath = path.join(__dirname, "..", "data", "snapshots");
 
 async function readHistory() {
   const raw = await fs.readFile(historyPath, "utf8");
@@ -28,26 +26,14 @@ async function runRegression({ url, includeUrlScan, includeFlows, triggeredBy = 
     for (const flow of data.flows || []) {
       try {
         const baseUrl = resolveFlowBaseUrl(flow, url);
-        const code = await aiService.convertFlowToScript(flow, baseUrl);
-        const specDir = path.join(__dirname, "..", "..", "temp-specs");
-        await fs.mkdir(specDir, { recursive: true });
-        const specPath = path.join(specDir, `${flow.id}-reg-${Date.now()}.spec.js`);
-        const wrapped = wrapPlaywrightSpec(flow.name, code);
-        await fs.writeFile(specPath, wrapped, "utf8");
-        const mod = await runPlaywrightSpec(specPath);
-        let specContent = "";
-        try {
-          specContent = await fs.readFile(specPath, "utf8");
-        } catch {
-          /* ignore */
-        }
-        const friendlyFailure = buildFriendlyFailureOrNull(mod.passed, mod.output, specContent, flow);
+        const mod = await runFlow(flow, baseUrl);
         flowResults.push({
           flowId: flow.id,
           name: flow.name,
           passed: mod.passed,
-          output: stripAnsi(mod.output).slice(-4000),
-          friendlyFailure,
+          output: "",
+          friendlyFailure: null,
+          screenshot: mod.screenshot || null,
         });
       } catch (e) {
         flowResults.push({ flowId: flow.id, name: flow.name, passed: false, error: e.message });
@@ -62,11 +48,8 @@ async function runRegression({ url, includeUrlScan, includeFlows, triggeredBy = 
     } catch (e) {
       throw new Error("Invalid URL for regression scan");
     }
-    const crawled = await crawler.crawl(normalized);
-    const gen = await aiService.generateTestCases(crawled, []);
-    const testCases = gen.testCases;
-    const results = await runTestCases(testCases.slice(0, 6), normalized);
-    urlScanResults.push(...results);
+    const scanRun = await runUrlScan(normalized);
+    urlScanResults.push(...(scanRun.results || []));
   }
 
   const passed =
@@ -152,8 +135,21 @@ router.post("/snapshot", async (req, res) => {
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ error: "url required" });
     const normalized = new URL(url.startsWith("http") ? url : `https://${url}`).href;
-    const snap = await crawler.saveSnapshot(normalized);
-    res.json({ snapshotId: snap.id, url: normalized });
+    await mcpBrowser.launch();
+    try {
+      const screenshot = await mcpBrowser.navigate(normalized);
+      await fs.mkdir(snapshotsPath, { recursive: true });
+      const id = `snap-${Date.now()}`;
+      const file = path.join(snapshotsPath, `${id}.json`);
+      await fs.writeFile(
+        file,
+        JSON.stringify({ id, url: normalized, createdAt: new Date().toISOString(), screenshot }, null, 2),
+        "utf8"
+      );
+      res.json({ snapshotId: id, url: normalized });
+    } finally {
+      await mcpBrowser.close();
+    }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -164,8 +160,16 @@ router.post("/check-changes", async (req, res) => {
     const { url, snapshotId } = req.body || {};
     if (!url || !snapshotId) return res.status(400).json({ error: "url and snapshotId required" });
     const normalized = new URL(url.startsWith("http") ? url : `https://${url}`).href;
-    const previous = await crawler.loadSnapshot(snapshotId);
-    const diff = await crawler.detectUIChanges(normalized, previous);
+    const snapFile = path.join(snapshotsPath, `${snapshotId}.json`);
+    const previous = JSON.parse(await fs.readFile(snapFile, "utf8"));
+    await mcpBrowser.launch();
+    let diff;
+    try {
+      const currentScreenshot = await mcpBrowser.navigate(normalized);
+      diff = await aiService.compareScreenshots(previous.screenshot, currentScreenshot);
+    } finally {
+      await mcpBrowser.close();
+    }
     let regressionRun = null;
     if (diff.hasChanges) {
       log("UI changes detected — running regression", "step");
@@ -176,7 +180,7 @@ router.post("/check-changes", async (req, res) => {
         triggeredBy: "ui-change",
       });
     }
-    res.json({ ...diff, regressionRun });
+    res.json({ hasChanges: diff.hasChanges, changes: diff.changes, regressionRun });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

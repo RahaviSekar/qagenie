@@ -11,7 +11,7 @@ A web app with 3 modes:
 2. **Business Logic** — define critical flows in plain English, AI writes and runs the scripts
 3. **Regression Suite** — every test run is saved and auto-triggered on code changes
 
-**Tech stack:** Node.js · Express · Playwright · Gemini AI · React (frontend)
+**Tech stack:** Node.js · Express · Playwright · Gemini AI · Next.js (frontend) · Tailwind CSS
 
 ---
 

@@ -82,6 +82,125 @@ function stripJsonFences(text) {
     .trim();
 }
 
+async function generateContentPartsWithRetry(parts, label = "AI") {
+  const maxAttempts429 = 2;
+  const models = modelChain();
+  let lastErr;
+
+  for (let mi = 0; mi < models.length; mi++) {
+    const modelName = models[mi];
+    const model = getGenerativeModel(modelName);
+
+    for (let attempt = 1; attempt <= maxAttempts429; attempt++) {
+      try {
+        if (mi > 0 || attempt > 1) {
+          log(`${label}: model "${modelName}" (attempt ${attempt})…`, "step");
+        }
+        const result = await model.generateContent(parts);
+        if (mi > 0) log(`${label}: success with ${modelName}`, "success");
+        return result;
+      } catch (e) {
+        lastErr = e;
+        if (isAuthError(e)) throw e;
+        if (isModelNotFound(e)) break;
+        if (isQuotaOrRateLimit(e)) {
+          const delay = Math.min(25_000, parseRetryDelayMs(e.message) || 5000 * attempt);
+          if (attempt < maxAttempts429) {
+            await sleep(delay);
+            continue;
+          }
+          break;
+        }
+        break;
+      }
+    }
+  }
+  throw lastErr || new Error("All Gemini models failed");
+}
+
+function parseJsonSafe(text, fallback) {
+  try {
+    return JSON.parse(stripJsonFences(text));
+  } catch {
+    return fallback;
+  }
+}
+
+async function analyzePageFromScreenshot(screenshotBase64, url) {
+  const prompt = `You are a QA engineer analyzing a webpage screenshot.
+Current URL: ${url}
+Generate up to 5 functional test cases as JSON array. Each test must involve actual interaction and verify the outcome.
+Examples:
+- { name: "Test Sign in by clicking and verifying navigation", assertion: "After clicking Sign in, the sign-in page or form is displayed", priority: "high" }
+- { name: "Test search by entering 'test query' and verifying results", assertion: "After entering 'test query' and clicking search, search results are shown", priority: "high" }
+Each object: { id: "check-1", name: "Test [feature] functionality", assertion: "Specific outcome after interaction", priority: "critical|high|medium" }
+Focus on key interactions like login, search, navigation, forms. Make assertions verifiable from the screenshot after actions.`;
+  const result = await generateContentPartsWithRetry(
+    [
+      { inlineData: { mimeType: "image/png", data: screenshotBase64 } },
+      { text: prompt },
+    ],
+    "Analyze page"
+  );
+  return parseJsonSafe(result.response.text(), []);
+}
+
+async function decideNextAction(screenshotBase64, goal, previousActions) {
+  const prompt = `You are testing a website to achieve this goal: ${goal}
+Previous actions taken: ${JSON.stringify(previousActions || [])}
+Decide the next single action to progress toward the goal.
+Return ONLY JSON: { action: "click"|"fill"|"navigate"|"assert"|"done", target: string, value: string, assertion: string, reasoning: string }
+- If the goal requires interaction (e.g., clicking, filling), do that first before asserting.
+- For assert, use the goal as the assertion if it describes the desired state.
+- Use exact visible text for targets, like "Sign in".
+- If goal is already achieved, use "assert" or "done".`;
+  const result = await generateContentPartsWithRetry(
+    [
+      { inlineData: { mimeType: "image/png", data: screenshotBase64 } },
+      { text: prompt },
+    ],
+    "Decide action"
+  );
+  return parseJsonSafe(result.response.text(), { action: "done", target: "", value: "", assertion: "", reasoning: "fallback" });
+}
+
+async function verifyAssertion(screenshotBase64, assertion) {
+  const prompt = `Look at this screenshot. Is this assertion true or false?
+Assertion: ${assertion}
+Return ONLY JSON: { passed: true|false, reason: string }`;
+  const result = await generateContentPartsWithRetry(
+    [
+      { inlineData: { mimeType: "image/png", data: screenshotBase64 } },
+      { text: prompt },
+    ],
+    "Verify assertion"
+  );
+  const parsed = parseJsonSafe(result.response.text(), { passed: false, reason: "Invalid JSON from model" });
+  return {
+    passed: Boolean(parsed.passed),
+    reason: String(parsed.reason || ""),
+  };
+}
+
+async function compareScreenshots(previousScreenshotBase64, currentScreenshotBase64) {
+  const prompt = `Compare these two webpage screenshots and return ONLY JSON:
+{ hasChanges: true|false, changes: string[] }.
+Focus on meaningful visual changes in layout/content/actions.`;
+  const result = await generateContentPartsWithRetry(
+    [
+      { inlineData: { mimeType: "image/png", data: previousScreenshotBase64 } },
+      { inlineData: { mimeType: "image/png", data: currentScreenshotBase64 } },
+      { text: prompt },
+    ],
+    "Compare screenshots"
+  );
+  const parsed = parseJsonSafe(result.response.text(), { hasChanges: false, changes: [] });
+  return {
+    hasChanges: Boolean(parsed.hasChanges),
+    changes: Array.isArray(parsed.changes) ? parsed.changes.map((x) => String(x)) : [],
+  };
+}
+
 /** Shrinks crawl JSON so free-tier token limits are less likely to hit (429). */
 function compressCrawlForAi(crawled, maxPages = 6) {
   const allPages = crawled.pages || [];
@@ -413,6 +532,10 @@ Write a single Playwright test file content that:
 module.exports = {
   generateTestCases,
   generateEdgeCases,
+  analyzePageFromScreenshot,
+  decideNextAction,
+  verifyAssertion,
+  compareScreenshots,
   convertFlowToScript,
   convertFlowToNegativeScripts,
   compressCrawlForAi,
