@@ -15,21 +15,56 @@
       ],
       "lastResult": {
         "passed": false,
-        "at": "2026-05-04T07:46:52.758Z",
-        "failureSummary": "The page took too long to open or finish loading. — Fill the Personal Information fields - First Name, Last Name, Email Addr…",
+        "at": "2026-05-18T05:22:02.916Z",
+        "failureSummary": "The test tried to click something, but that control was not ready in time. — In Account Information section, fill password(Make sure to read the Pass…",
         "reportSummary": {
-          "total": 6,
-          "passedCount": 0,
+          "total": 7,
+          "passedCount": 1,
           "failedCount": 6,
           "happyPassed": false,
-          "negativePassed": 0,
-          "negativeFailed": 0,
-          "negativeTotal": 0,
+          "negativePassed": 1,
+          "negativeFailed": 2,
+          "negativeTotal": 3,
+          "positivePassed": 0,
+          "positiveFailed": 3,
+          "positiveTotal": 3,
           "includeNegativeTests": true
         }
       },
       "createdAt": "2026-05-04T04:59:51.112Z",
-      "baseUrl": "https://dev.ges.store"
+      "baseUrl": "https://dev.ges.store/"
+    },
+    {
+      "id": "flow-0a6ea13f-4ff6-4e58-8eb3-454c1baca8cc",
+      "name": "Add to Cart",
+      "steps": [
+        "Go to the Base URL for this flow",
+        "in the top navigation click \"Decor\"",
+        "inside \"Decor\" click \"Wall Mirrors\" under \"Mirror\" section",
+        "Click the image of the first product",
+        "Click \"Add to Cart\" button",
+        "Check Added to Cart! flyout is coming or not"
+      ],
+      "lastResult": {
+        "passed": false,
+        "at": "2026-05-18T08:06:14.944Z",
+        "failureSummary": "The site showed a bot / security check — not your real storefront.",
+        "reportSummary": {
+          "total": 1,
+          "passedCount": 0,
+          "failedCount": 1,
+          "happyPassed": false,
+          "negativePassed": 0,
+          "negativeFailed": 0,
+          "negativeTotal": 0,
+          "positivePassed": 0,
+          "positiveFailed": 0,
+          "positiveTotal": 0,
+          "includeNegativeTests": true
+        }
+      },
+      "createdAt": "2026-05-18T05:29:46.662Z",
+      "baseUrl": "https://www.graciousgarage.com/"
     }
   ]
 }

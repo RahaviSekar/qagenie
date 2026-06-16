@@ -2,6 +2,12 @@
  * Turn Playwright CLI output into short, non-technical explanations for QA Genie users.
  */
 
+const fs = require("fs");
+const path = require("path");
+const { summarizeStepForReport } = require("./flowStepParser");
+
+const projectRoot = path.join(__dirname, "..", "..");
+
 const ANSI_RE = /\u001b\[[0-9;]*m/g;
 
 function stripAnsi(text) {
@@ -20,10 +26,35 @@ function findSpecStackLines(output) {
   return hits;
 }
 
-/** Prefer the stack frame that points at the failing line (often last hit). */
-function pickFailureLine(output) {
+/** End line (1-based) of the happy-path test block in the spec file. */
+function findHappyPathEndLine(specContent) {
+  if (!specContent) return null;
+  const lines = specContent.split(/\r?\n/);
+  let happyStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/\btest\s*\(/.test(lines[i]) && /happy\s*path/i.test(lines[i])) {
+      happyStart = i;
+      break;
+    }
+  }
+  if (happyStart < 0) return null;
+  for (let i = happyStart + 1; i < lines.length; i++) {
+    if (/\btest\s*\(/.test(lines[i]) && !/happy\s*path/i.test(lines[i])) {
+      return i;
+    }
+  }
+  return lines.length;
+}
+
+/** Prefer failure inside the happy-path test — not invented POS/NEG tests. */
+function pickFailureLine(output, specContent) {
   const hits = findSpecStackLines(output);
   if (!hits.length) return null;
+  const happyEnd = findHappyPathEndLine(specContent);
+  if (happyEnd != null) {
+    const inHappy = hits.filter((h) => h.line <= happyEnd);
+    if (inHappy.length) return inHappy[inHappy.length - 1].line;
+  }
   return hits[hits.length - 1].line;
 }
 
@@ -84,6 +115,50 @@ function extractFirstErrorLine(output) {
 function classify(plain) {
   const lower = plain.toLowerCase();
   const waiting = extractWaitingFor(plain);
+
+  if (/has already been declared|syntaxerror:.*\.spec\.js/i.test(lower)) {
+    return {
+      kind: "spec_syntax",
+      headline: "The generated test file had invalid syntax and could not run.",
+      body:
+        "This was a duplicate helper in the script (e.g. qaStep declared twice). Restart the server and Run again — your checklist does not need to change.",
+      tips: ["Restart the backend, then click Run again.", "If it persists, use Script to download and inspect the file."],
+      waiting,
+    };
+  }
+
+  if (/outside of the viewport|element is outside of the viewport/i.test(lower)) {
+    return {
+      kind: "viewport_click",
+      headline: "The menu link was found but Playwright could not click it in the visible area.",
+      body:
+        "Common on storefronts: a cookie banner, sticky header, or a duplicate hidden mobile menu link. The updated script dismisses cookies, scrolls the real a.main-menu-link into view, and retries the click.",
+      tips: [
+        "Restart the server and Run again — watch the Activity log for lines like “Accepted cookie banner” and “Click top nav: Decor”.",
+        "Keep PLAYWRIGHT_HEADED=true if the site uses bot checks.",
+      ],
+      waiting,
+    };
+  }
+
+  if (
+    /performing security verification|verify you are not a bot|security service to protect|just a moment|checking your browser before accessing/i.test(
+      lower
+    )
+  ) {
+    return {
+      kind: "bot_challenge",
+      headline: "The site showed a bot / security check — not your real storefront.",
+      body:
+        'Automated Chrome hit Cloudflare (or similar) before menu items like "Decor" could load. Your flow steps are fine; the browser never reached the page in your screenshot.',
+      tips: [
+        "Add PLAYWRIGHT_HEADED=true to .env, restart the server, and re-run (visible browser often passes checks).",
+        "Ask your team for a staging URL without bot protection, or allowlist QA automation traffic.",
+        "If it still fails, the site may block all automation — use a manual recorder or locator hints on a reachable environment.",
+      ],
+      waiting,
+    };
+  }
 
   if (/aborted: exceeded playwright_run_timeout|\[qa genie\] aborted/i.test(plain)) {
     return {
@@ -156,6 +231,19 @@ function classify(plain) {
         waiting,
       };
     }
+    if (/getbyrole\(['"]link['"]/i.test(lower) && /decor|furniture|mirror|navigation/i.test(lower)) {
+      return {
+        kind: "strict_nav",
+        headline: "The menu link matched more than one item on the page (strict mode).",
+        body:
+          'A partial name like /decor/i can match both "Decor" and "HOME DECOR". The test must use the exact menu label (e.g. /^decor$/i) and .first(), often scoped to the top navigation.',
+        tips: [
+          'Re-run the flow — new scripts use exact menu names from your checklist.',
+          'Optional: add a locator hint on the step, e.g. click "Decor" >> getByRole(\'navigation\').getByRole(\'link\', { name: /^decor$/i }).first()',
+        ],
+        waiting,
+      };
+    }
     return {
       kind: "strict",
       headline: "More than one element matched what the test tried to use.",
@@ -211,14 +299,45 @@ function classify(plain) {
   };
 }
 
+/** Playwright writes bot-check page snapshots here — stdout often omits them. */
+function appendLatestErrorContext(plain, specPath) {
+  if (!specPath) return plain;
+  try {
+    const slug = path.basename(specPath).replace(/\.spec\.js$/i, "").slice(0, 28);
+    const resultsRoot = path.join(projectRoot, "test-results");
+    if (!fs.existsSync(resultsRoot)) return plain;
+    const dirs = fs
+      .readdirSync(resultsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.includes(slug))
+      .map((d) => d.name)
+      .sort()
+      .reverse();
+    for (const dir of dirs) {
+      const ctxPath = path.join(resultsRoot, dir, "error-context.md");
+      if (fs.existsSync(ctxPath)) {
+        const full = fs.readFileSync(ctxPath, "utf8");
+        // Omit the huge accessibility snapshot — it contains unrelated strings (e.g. Cloudflare footer links)
+        // that falsely trigger bot-page classification.
+        const snap = full.indexOf("\n# Page snapshot\n");
+        const clipped = snap > 0 ? full.slice(0, snap) : full.slice(0, 6000);
+        return `${plain}\n\n${clipped}`;
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return plain;
+}
+
 /**
  * @param {string} output - raw Playwright stdout/stderr
  * @param {string} specContent - final written spec (wrapped) source
  * @param {{ steps?: string[] }} flow - saved flow with plain-English steps
+ * @param {{ specPath?: string }} [opts]
  */
-function buildFriendlyFailure(output, specContent, flow) {
-  const plain = stripAnsi(output);
-  const failureLine = pickFailureLine(plain);
+function buildFriendlyFailure(output, specContent, flow, opts = {}) {
+  const plain = appendLatestErrorContext(stripAnsi(output), opts.specPath);
+  const failureLine = pickFailureLine(plain, specContent);
   const comment = findNearestStepComment(specContent, failureLine);
   const steps = Array.isArray(flow?.steps) ? flow.steps : [];
   const flowStepIndex = comment && comment.stepNumber >= 1 && comment.stepNumber <= steps.length ? comment.stepNumber - 1 : null;
@@ -232,7 +351,11 @@ function buildFriendlyFailure(output, specContent, flow) {
   if (stepNum != null && stepNum > 1 && steps.length) {
     const upto = Math.min(stepNum - 1, steps.length);
     for (let i = 0; i < upto; i++) {
-      completedSteps.push({ number: i + 1, text: steps[i] });
+      completedSteps.push({
+        number: i + 1,
+        text: steps[i],
+        summary: summarizeStepForReport(steps[i]),
+      });
     }
   }
 
@@ -268,11 +391,14 @@ function buildFriendlyFailure(output, specContent, flow) {
     totalSteps: steps.length > 0 ? steps.length : null,
     failedAtStepNumber: stepNum,
     failedStepText: flowStepText || null,
-    completedSteps,
+    completedSteps: cls.kind === "bot_challenge" ? [] : completedSteps,
+    failedStepSummary: flowStepText ? summarizeStepForReport(flowStepText) : null,
     note:
-      stepNum != null
-        ? "Each step listed above finished without an error before the test stopped at the failed step (same order as your checklist)."
-        : "We could not tie this error to a numbered step because the generated script had no clear // Step N comment above the failure line.",
+      cls.kind === "bot_challenge"
+        ? "The automated browser was stopped on a security / bot check page (Cloudflare). Your store menu never loaded — this is not a wrong “Decor” locator."
+        : stepNum != null
+          ? `Steps 1–${stepNum - 1} of your checklist finished in the browser before the run stopped at step ${stepNum}. That usually means a wrong locator on the failed step, not that earlier pages failed.`
+          : "We could not tie this error to a numbered step because the generated script had no clear // Step N comment above the failure line.",
   };
 
   return {
@@ -293,10 +419,10 @@ function buildFriendlyFailure(output, specContent, flow) {
   };
 }
 
-function buildFriendlyFailureOrNull(passed, output, specContent, flow) {
+function buildFriendlyFailureOrNull(passed, output, specContent, flow, opts = {}) {
   if (passed) return null;
   try {
-    return buildFriendlyFailure(output, specContent || "", flow || {});
+    return buildFriendlyFailure(output, specContent || "", flow || {}, opts);
   } catch {
     return {
       headline: "The automated test did not finish successfully.",

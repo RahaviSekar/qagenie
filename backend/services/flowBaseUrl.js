@@ -29,6 +29,34 @@ function resolveFlowBaseUrl(flow, requestBaseUrl) {
   return "https://example.com";
 }
 
+/**
+ * Turn a user or model path into a full URL for Playwright page.goto.
+ * Absolute http(s) targets are returned unchanged; paths like /login join to base.
+ */
+function resolveNavigationTarget(raw, base) {
+  const t = String(raw || "").trim();
+  if (!t) throw new Error("Navigation target is empty");
+  if (/^https?:\/\//i.test(t)) return t;
+  const b = String(base || "").trim();
+  if (!b) {
+    throw new Error(
+      `Cannot navigate to "${t}" without a base URL. Set the flow's baseUrl or pass baseUrl in the run request.`
+    );
+  }
+  const baseStr = b.startsWith("http") ? b : `https://${b}`;
+  let baseUrlObj;
+  try {
+    baseUrlObj = new URL(baseStr);
+  } catch {
+    throw new Error(`Invalid base URL for navigation: ${b}`);
+  }
+  try {
+    return new URL(t, baseUrlObj).href;
+  } catch (e) {
+    throw new Error(`Invalid navigation target "${t}" with base ${b}: ${e.message}`);
+  }
+}
+
 /** Gemini often still emits example.com — swap to the user's origin. */
 function rewriteExampleComToBase(code, baseOrigin) {
   if (!code || !baseOrigin) return String(code);
@@ -40,5 +68,6 @@ module.exports = {
   toOrigin,
   toDisplayBase,
   resolveFlowBaseUrl,
+  resolveNavigationTarget,
   rewriteExampleComToBase,
 };

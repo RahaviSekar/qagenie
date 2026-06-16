@@ -2,6 +2,65 @@ const mcpBrowser = require("./mcpBrowser");
 const aiService = require("./aiService");
 const { log } = require("./logEmitter");
 
+/**
+ * "Go to /login"–style steps: if the address bar pathname matches the path in
+ * the step, treat as pass without vision-only AI (models often mis-read Secure
+ * Access gates on login URLs as "wrong page").
+ * @returns {boolean|null} true = pass, false = nav step but path mismatch, null = skip heuristic
+ */
+function extractNavigatePathFromGoal(goal) {
+  const g = String(goal || "").trim();
+  const m = g.match(/\b(?:go to|navigate to|open|visit|head to)\s+(\/[^\s,;).!?]+)/i);
+  return m ? m[1] : null;
+}
+
+function navigateOnlyStepPathMatches(goal, currentUrl) {
+  const g = String(goal || "").trim();
+  const u = String(currentUrl || "").trim();
+  if (!g || !u || u === "about:blank") return null;
+  const wantPath = extractNavigatePathFromGoal(g);
+  if (!wantPath) return null;
+  let pathname;
+  try {
+    pathname = new URL(u).pathname;
+  } catch {
+    return null;
+  }
+  const norm = (p) => (String(p).replace(/\/+$/, "") || "/").toLowerCase();
+  const want = norm(wantPath);
+  const cur = norm(pathname);
+  if (want === "/") return null;
+  if (cur === want) return true;
+  if (cur.startsWith(want + "/")) return true;
+  return false;
+}
+
+async function verifyStepOutcome(testCase, screenshots) {
+  let pageUrl = "";
+  try {
+    pageUrl = await mcpBrowser.getCurrentUrl();
+  } catch (_) {
+    pageUrl = "";
+  }
+  const navMatch = navigateOnlyStepPathMatches(testCase.goal, pageUrl);
+  if (navMatch === true) {
+    return {
+      passed: true,
+      verification: { passed: true, reason: `Address bar path matches navigation step (${pageUrl}).` },
+      error: null,
+    };
+  }
+  const finalShot = await mcpBrowser.screenshot();
+  screenshots.push(finalShot);
+  const verification = await aiService.verifyAssertion(finalShot, testCase.assertion);
+  const passed = Boolean(verification.passed);
+  return {
+    passed,
+    verification,
+    error: passed ? null : verification.reason || "assertion failed",
+  };
+}
+
 function normalizeCase(raw, i) {
   return {
     id: raw.id || `TC-${String(i + 1).padStart(3, "0")}`,
@@ -36,6 +95,7 @@ function fallbackCasesForUrl(url) {
 
 async function runSingleTest(testCase, url, opts = {}) {
   const maxSteps = opts.maxSteps || 10;
+  const skipInitialNavigate = Boolean(opts.skipInitialNavigate);
   const screenshots = [];
   const history = [];
   const startedAt = Date.now();
@@ -43,11 +103,16 @@ async function runSingleTest(testCase, url, opts = {}) {
   let error = null;
   let verification = null;
 
-  await mcpBrowser.navigate(url);
+  if (skipInitialNavigate) {
+    await mcpBrowser.ensurePage();
+  } else {
+    const pathFromGoal = extractNavigatePathFromGoal(testCase.goal);
+    await mcpBrowser.navigate(pathFromGoal || url, { baseUrl: url });
+  }
   for (let i = 0; i < maxSteps; i++) {
     const screenshot = await mcpBrowser.screenshot();
     screenshots.push(screenshot);
-    log(`Step ${i + 1}: deciding next action for ${testCase.name}`, "step", { screenshot });
+    log(`MCP iteration ${i + 1}/${maxSteps} — ${testCase.name}`, "step", { screenshot });
 
     let action;
     try {
@@ -73,14 +138,16 @@ async function runSingleTest(testCase, url, opts = {}) {
       if (r.screenshot) screenshots.push(r.screenshot);
       if (error) break;
     } else if (actionType === "navigate") {
-      const shot = await mcpBrowser.navigate(action.target);
+      const shot = await mcpBrowser.navigate(action.target, { baseUrl: url });
       screenshots.push(shot);
     } else if (actionType === "assert") {
-      const finalShot = await mcpBrowser.screenshot();
-      screenshots.push(finalShot);
-      verification = await aiService.verifyAssertion(finalShot, action.assertion || testCase.assertion);
-      passed = Boolean(verification.passed);
-      if (!passed && verification.reason) error = verification.reason;
+      const outcome = await verifyStepOutcome(
+        { ...testCase, assertion: action.assertion || testCase.assertion },
+        screenshots
+      );
+      verification = outcome.verification;
+      passed = outcome.passed;
+      error = outcome.error;
       break;
     }
 
@@ -92,11 +159,10 @@ async function runSingleTest(testCase, url, opts = {}) {
   }
 
   if (!passed && !error && verification == null) {
-    const finalShot = await mcpBrowser.screenshot();
-    screenshots.push(finalShot);
-    verification = await aiService.verifyAssertion(finalShot, testCase.assertion);
-    passed = Boolean(verification.passed);
-    if (!passed) error = verification.reason || "assertion failed";
+    const outcome = await verifyStepOutcome(testCase, screenshots);
+    verification = outcome.verification;
+    passed = outcome.passed;
+    error = outcome.error;
   }
 
   return {
@@ -138,16 +204,25 @@ async function runUrlScan(url) {
 async function runFlow(flow, baseUrl) {
   const steps = Array.isArray(flow.steps) ? flow.steps : [];
   const results = [];
-  for (let i = 0; i < steps.length; i++) {
-    const tc = {
-      id: `${flow.id || "flow"}-step-${i + 1}`,
-      name: `${flow.name} · step ${i + 1}`,
-      goal: steps[i],
-      assertion: `Step outcome achieved: ${steps[i]}`,
-    };
-    const r = await runSingleTest(tc, baseUrl);
-    results.push(r);
-    if (!r.passed) break;
+  await mcpBrowser.launch();
+  try {
+    for (let i = 0; i < steps.length; i++) {
+      const tc = {
+        id: `${flow.id || "flow"}-step-${i + 1}`,
+        name: `${flow.name} · flow step ${i + 1}/${steps.length}`,
+        goal: steps[i],
+        assertion: String(steps[i] || "").trim() || `Flow step ${i + 1}`,
+      };
+      const preview = String(steps[i] || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      log(`Flow step ${i + 1}/${steps.length} start — ${preview}${preview.length >= 120 ? "…" : ""}`, "step");
+      const r = await runSingleTest(tc, baseUrl, { skipInitialNavigate: i > 0 });
+      results.push(r);
+      const tail = r.error ? ` — ${r.error}` : "";
+      log(`${r.passed ? "PASS" : "FAIL"} ${tc.name}${tail}`, r.passed ? "success" : "error", r.screenshot ? { screenshot: r.screenshot } : null);
+      if (!r.passed) break;
+    }
+  } finally {
+    await mcpBrowser.close();
   }
   return {
     flowId: flow.id,

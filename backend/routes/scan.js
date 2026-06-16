@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { runUrlScan } = require("../services/agentRunner");
+const { runUrlScanE2E } = require("../services/urlScanOrchestrator");
 const { log } = require("../services/logEmitter");
 const fs = require("fs").promises;
 const path = require("path");
@@ -29,13 +29,12 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Invalid URL" });
     }
 
-    log(`URL scan requested: ${normalized}`, "info");
-    log("Launching MCP browser...", "step");
-    const scanRun = await runUrlScan(normalized);
+    log(`URL scan (MCP E2E): ${normalized}`, "info");
+    const scanRun = await runUrlScanE2E(normalized);
     const testCases = scanRun.testCases || [];
     const results = scanRun.results || [];
-    const passed = results.filter((r) => r.passed).length;
-    const failed = results.length - passed;
+    const passed = scanRun.summary?.passed ?? results.filter((r) => r.passed).length;
+    const failed = scanRun.summary?.failed ?? results.length - passed;
 
     const historyRun = {
       id: `run-${uuidv4()}`,
@@ -44,10 +43,10 @@ router.post("/", async (req, res) => {
       urlScanResults: results,
       flowResults: [],
       summary: {
-        total: results.length,
+        total: scanRun.summary?.total ?? results.length,
         passed,
         failed,
-        duration: results.reduce((a, r) => a + (r.duration || 0), 0),
+        duration: scanRun.summary?.duration ?? 0,
       },
     };
     await appendRegressionRun(historyRun);
@@ -55,10 +54,13 @@ router.post("/", async (req, res) => {
     res.json({
       testCases,
       results,
+      report: scanRun.report,
       summary: historyRun.summary,
       crawledPages: null,
       regressionRunId: historyRun.id,
-      aiSource: "gemini-vision-mcp",
+      aiSource: scanRun.aiSource || "mcp-e2e-playwright",
+      exploration: scanRun.exploration,
+      specPath: scanRun.specPath,
       aiWarning: null,
     });
   } catch (e) {

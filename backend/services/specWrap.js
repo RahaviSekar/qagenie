@@ -1,3 +1,5 @@
+const { stripAiPlaywrightCode } = require("./flowScriptSanitizer");
+
 /**
  * Normalize AI-generated Playwright code to CommonJS so the CLI always picks up tests.
  * ESM `import … @playwright/test` is stripped and replaced with require().
@@ -36,13 +38,13 @@ function wrapPlaywrightSpec(flowName, code) {
  */
 function combineHappyAndNegative(flowLabel, happyCode, negativeCode) {
   const happyTitle = `${flowLabel} — happy path`;
-  let h = stripLeadingPlaywrightRequire(stripPlaywrightImports(happyCode));
+  let h = stripLeadingPlaywrightRequire(stripPlaywrightImports(stripAiPlaywrightCode(happyCode)));
   if (!/\btest\s*\(/.test(h)) {
     h = `test(${JSON.stringify(happyTitle)}, async ({ page }) => {\n${h}\n});`;
   } else {
     h = h.replace(/\btest\s*\(\s*['"]([^'"]*)['"]\s*,/, `test(${JSON.stringify(happyTitle)},`);
   }
-  let n = stripLeadingPlaywrightRequire(stripPlaywrightImports(negativeCode || ""));
+  let n = stripLeadingPlaywrightRequire(stripPlaywrightImports(stripAiPlaywrightCode(negativeCode || "")));
   const body = `const { test, expect } = require('@playwright/test');\n\n${h}\n\n${n}\n`;
   return body;
 }

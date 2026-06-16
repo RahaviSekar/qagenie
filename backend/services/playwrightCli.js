@@ -6,16 +6,39 @@ const { tryParsePlaywrightJsonReport, extractTestsFromPlaywrightJson } = require
 
 const projectRoot = path.join(__dirname, "..", "..");
 
-/** Wall-clock cap for the whole `npx playwright test` process (browser + test). */
-function getRunTimeoutMs() {
-  const n = Number(process.env.PLAYWRIGHT_RUN_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 180_000;
-}
-
 /** Passed to Playwright as --timeout (per-test, ms). */
 function getTestTimeoutMs() {
   const n = Number(process.env.PLAYWRIGHT_TEST_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 120_000;
+  return Number.isFinite(n) && n > 0 ? n : 180_000;
+}
+
+/** Wall-clock cap for the whole `npx playwright test` process (browser + all tests). */
+function getRunTimeoutMs(overrides = {}) {
+  if (overrides.runTimeoutMs != null && overrides.runTimeoutMs > 0) {
+    return overrides.runTimeoutMs;
+  }
+  const n = Number(process.env.PLAYWRIGHT_RUN_TIMEOUT_MS);
+  if (Number.isFinite(n) && n > 0) return n;
+  return 600_000;
+}
+
+/**
+ * Scale wall-clock budget from test count (each test may use full per-test timeout).
+ * @param {number} testCount
+ * @param {number} [testTimeoutMs]
+ */
+function computeRunTimeoutMs(testCount, testTimeoutMs = getTestTimeoutMs()) {
+  const count = Math.max(1, testCount || 1);
+  const perTest = testTimeoutMs;
+  const fromEnv = Number(process.env.PLAYWRIGHT_RUN_TIMEOUT_MS);
+  const computed = count * perTest + 120_000;
+  const floor = 300_000;
+  const cap = 3_600_000;
+  let ms = Math.max(floor, computed);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    ms = Math.max(ms, fromEnv);
+  }
+  return Math.min(cap, ms);
 }
 
 function killProcessTree(pid) {
@@ -41,8 +64,13 @@ function killProcessTree(pid) {
 function runPlaywrightSpec(specPath, opts = {}) {
   const maxFailures = opts.maxFailures != null ? opts.maxFailures : 1;
   const jsonReport = Boolean(opts.jsonReport);
-  const runTimeoutMs = getRunTimeoutMs();
-  const testTimeoutMs = getTestTimeoutMs();
+  const testTimeoutMs = opts.testTimeoutMs != null ? opts.testTimeoutMs : getTestTimeoutMs();
+  const runTimeoutMs =
+    opts.runTimeoutMs != null
+      ? opts.runTimeoutMs
+      : opts.testCount != null
+        ? computeRunTimeoutMs(opts.testCount, testTimeoutMs)
+        : getRunTimeoutMs();
 
   return new Promise((resolve) => {
     const outChunks = [];
@@ -69,6 +97,10 @@ function runPlaywrightSpec(specPath, opts = {}) {
       return;
     }
     const testTarget = rel.includes(" ") ? `"${rel}"` : rel;
+    log(
+      `Playwright: up to ${Math.round(runTimeoutMs / 60_000)} min total, ${Math.round(testTimeoutMs / 1000)}s per test`,
+      "step"
+    );
     const usePnpm = fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"));
     const cmd = usePnpm ? "pnpm" : "npx";
     const reporterArg = jsonReport ? "--reporter=json" : "--reporter=line";
@@ -100,14 +132,25 @@ function runPlaywrightSpec(specPath, opts = {}) {
       });
     }, runTimeoutMs);
 
+    const forwardQaGenieLines = (chunk) => {
+      for (const line of chunk.split(/\r?\n/)) {
+        const t = line.trim();
+        if (!t.includes("[QA Genie]")) continue;
+        const msg = t.replace(/.*\[QA Genie\]\s*/, "").trim();
+        if (msg) log(msg, "step");
+      }
+    };
+
     proc.stdout.on("data", (d) => {
       const t = d.toString();
       outChunks.push(t);
+      forwardQaGenieLines(t);
       if (!jsonReport) log(t.trimEnd(), "info");
     });
     proc.stderr.on("data", (d) => {
       const t = d.toString();
       errChunks.push(t);
+      forwardQaGenieLines(t);
       if (!jsonReport) log(t.trimEnd(), "error");
     });
     proc.on("close", (code) => {
@@ -147,4 +190,10 @@ function runPlaywrightSpec(specPath, opts = {}) {
   });
 }
 
-module.exports = { runPlaywrightSpec, getRunTimeoutMs, getTestTimeoutMs, projectRoot };
+module.exports = {
+  runPlaywrightSpec,
+  getRunTimeoutMs,
+  getTestTimeoutMs,
+  computeRunTimeoutMs,
+  projectRoot,
+};

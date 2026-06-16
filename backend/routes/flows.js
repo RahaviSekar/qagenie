@@ -4,12 +4,13 @@ const fs = require("fs").promises;
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const aiService = require("../services/aiService");
-const { runFlow } = require("../services/agentRunner");
+const { runBusinessFlow } = require("../services/flowOrchestrator");
 const { resolveFlowBaseUrl } = require("../services/flowBaseUrl");
+const { buildFriendlyFailureOrNull } = require("../services/friendlyRunReport");
+const { sanitizeGeneratedFlowScript } = require("../services/flowScriptSanitizer");
 const { log } = require("../services/logEmitter");
 
 const dataPath = path.join(__dirname, "..", "data", "flows.json");
-/** One flow run at a time so rapid clicks do not stack Gemini + Playwright for 15+ minutes. */
 let flowRunInProgress = false;
 
 async function readFlows() {
@@ -107,81 +108,35 @@ router.post("/:id/script", async (req, res) => {
     const flow = (data.flows || []).find((f) => f.id === req.params.id);
     if (!flow) return res.status(404).json({ error: "Flow not found" });
     const baseUrl = resolveFlowBaseUrl(flow, req.body?.baseUrl);
-    const code = await aiService.convertFlowToScript(flow, baseUrl);
+    let code = await aiService.convertFlowToScript(flow, baseUrl);
+    code = sanitizeGeneratedFlowScript(code, flow);
     res.json({ flowId: flow.id, code });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-async function runSingleFlow(flow, requestBaseUrl) {
+async function runSingleFlow(flow, requestBaseUrl, options = {}) {
   const baseUrl = resolveFlowBaseUrl(flow, requestBaseUrl);
-  log(`Running flow in MCP mode: ${flow.name}`, "step");
-  const agentResult = await runFlow(flow, baseUrl);
-  const cases = (agentResult.results || []).map((r) => ({
-    kind: "happy_path",
-    title: r.name,
-    passed: r.passed,
-    durationMs: r.duration || null,
-    errorMessage: r.error || null,
-  }));
-  const happyPassed = agentResult.passed;
-  const overallPassed = agentResult.passed;
-  const friendlyFailure = overallPassed
-    ? null
-    : {
-        headline: "The flow failed during agentic MCP execution.",
-        stepSummary: agentResult.results.find((r) => !r.passed)?.name || flow.name,
-        stepNumber: null,
-        flowStepText: null,
-        scriptCommentLabel: null,
-        whatHappened: agentResult.results.find((r) => !r.passed)?.error || "Assertion failed.",
-        suggestions: ["Re-run with a more explicit step description.", "Check if UI labels changed from expected text."],
-        progress: null,
-        technical: { failureLine: null, waitingFor: null, errorSnippet: agentResult.results.find((r) => !r.passed)?.error || null },
-        oneLineSummary: `Flow failed: ${flow.name}`,
-      };
-
-  return {
-    flowId: flow.id,
-    name: flow.name,
-    passed: overallPassed,
-    output: "",
-    exitCode: overallPassed ? 0 : 1,
-    timedOut: false,
-    friendlyFailure,
-    report: {
-      summary: {
-        total: cases.length,
-        passedCount: cases.filter((c) => c.passed).length,
-        failedCount: cases.filter((c) => !c.passed).length,
-        happyPassed,
-        negativePassed: 0,
-        negativeFailed: 0,
-        negativeTotal: 0,
-        includeNegativeTests: false,
-      },
-      cases,
-    },
-    screenshot: agentResult.screenshot || null,
-  };
+  const includeNegativeTests = Boolean(options.includeNegativeTests);
+  return runBusinessFlow(flow, baseUrl, { includeNegativeTests });
 }
 
 router.post("/run", async (req, res) => {
   if (flowRunInProgress) {
     return res.status(409).json({
-      error:
-        "A flow run is already in progress. Wait for it to finish, or increase timeouts only if needed (PLAYWRIGHT_RUN_TIMEOUT_MS).",
+      error: "A flow run is already in progress. Wait for it to finish.",
     });
   }
   flowRunInProgress = true;
   try {
     const requestBase = req.body?.baseUrl;
+    const includeNegativeTests = Boolean(req.body?.includeNegativeTests);
     const data = await readFlows();
     const flows = data.flows || [];
     const results = [];
     for (const flow of flows) {
-      const r = await runSingleFlow(flow, requestBase);
+      const r = await runSingleFlow(flow, requestBase, { includeNegativeTests });
       results.push(r);
       const rs = r.report?.summary;
       flow.lastResult = r.passed
@@ -205,8 +160,7 @@ router.post("/run", async (req, res) => {
 router.post("/:id/run", async (req, res) => {
   if (flowRunInProgress) {
     return res.status(409).json({
-      error:
-        "A flow run is already in progress. Wait for it to finish before starting another.",
+      error: "A flow run is already in progress. Wait for it to finish before starting another.",
     });
   }
   flowRunInProgress = true;
@@ -214,7 +168,8 @@ router.post("/:id/run", async (req, res) => {
     const data = await readFlows();
     const flow = (data.flows || []).find((f) => f.id === req.params.id);
     if (!flow) return res.status(404).json({ error: "Flow not found" });
-    const r = await runSingleFlow(flow, req.body?.baseUrl);
+    const includeNegativeTests = Boolean(req.body?.includeNegativeTests);
+    const r = await runSingleFlow(flow, req.body?.baseUrl, { includeNegativeTests });
     const rs = r.report?.summary;
     flow.lastResult = r.passed
       ? { passed: true, at: new Date().toISOString(), ...(rs ? { reportSummary: rs } : {}) }

@@ -29,11 +29,12 @@ const LS_BASE_URL = "qa-genie-default-base-url";
 const LS_INCLUDE_NEGATIVE = "qa-genie-include-negative-run";
 
 type FlowRunCaseRow = {
-  kind: "happy_path" | "negative";
+  kind: "happy_path" | "negative" | "positive";
   title: string;
   passed: boolean;
   durationMs?: number | null;
   errorMessage?: string | null;
+  plainSummary?: string | null;
 };
 
 type FlowRunReportShape = {
@@ -45,32 +46,59 @@ type FlowRunReportShape = {
     negativePassed: number;
     negativeFailed: number;
     negativeTotal: number;
+    positivePassed?: number;
+    positiveFailed?: number;
+    positiveTotal?: number;
     includeNegativeTests?: boolean;
   };
   cases: FlowRunCaseRow[];
 };
 
-function formatBugReportText(flowName: string, report: FlowRunReportShape, overallPassed: boolean) {
+function formatBugReportText(
+  flowName: string,
+  report: FlowRunReportShape,
+  overallPassed: boolean,
+  progress?: FriendlyFailureProgress | null
+) {
   const s = report.summary;
   const lines: string[] = [];
   lines.push(`QA Genie — ${flowName}`);
   lines.push(`Overall: ${overallPassed ? "PASSED" : "FAILED"}`);
   lines.push("");
+  if (progress && (progress.completedSteps.length > 0 || progress.failedAtStepNumber)) {
+    lines.push("Where the automated run got to (your checklist)");
+    for (const step of progress.completedSteps) {
+      lines.push(`  ✓ ${step.summary || step.text}`);
+    }
+    if (progress.failedAtStepNumber != null) {
+      lines.push(
+        `  ✗ Step ${progress.failedAtStepNumber}: ${progress.failedStepSummary || progress.failedStepText || "Failed"}`
+      );
+    }
+    lines.push("");
+  }
   lines.push("Summary");
   lines.push(`- Happy path: ${s.happyPassed ? "PASSED" : "FAILED"}`);
+  if ((s.positiveTotal ?? 0) > 0) {
+    lines.push(
+      `- Positive scenarios: ${s.positivePassed ?? 0} passed, ${s.positiveFailed ?? 0} failed (${s.positiveTotal} total)`
+    );
+  }
   if (s.negativeTotal > 0) {
     lines.push(`- Negative scenarios: ${s.negativePassed} passed, ${s.negativeFailed} failed (${s.negativeTotal} total)`);
-  } else {
-    lines.push("- Negative scenarios: (none in this run)");
+  } else if ((s.positiveTotal ?? 0) === 0) {
+    lines.push("- Extra scenarios: (none in this run — enable scenario checks on run)");
   }
   lines.push(`- Checks total: ${s.total} (${s.passedCount} passed, ${s.failedCount} failed)`);
   lines.push("");
   lines.push("Per-check results");
   for (const c of report.cases) {
-    const tag = c.kind === "negative" ? "NEGATIVE" : "HAPPY PATH";
+    const tag =
+      c.kind === "negative" ? "NEGATIVE" : c.kind === "positive" ? "POSITIVE" : "HAPPY PATH";
     lines.push(`[${c.passed ? "PASS" : "FAIL"}] [${tag}] ${c.title}`);
-    if (!c.passed && c.errorMessage) {
-      lines.push(`  Error: ${c.errorMessage.replace(/\s+/g, " ").trim()}`);
+    if (!c.passed) {
+      const plain = c.plainSummary || c.errorMessage;
+      if (plain) lines.push(`  What went wrong: ${plain.replace(/\s+/g, " ").trim()}`);
     }
   }
   lines.push("");
@@ -83,7 +111,8 @@ type FriendlyFailureProgress = {
   totalSteps: number | null;
   failedAtStepNumber: number | null;
   failedStepText: string | null;
-  completedSteps: { number: number; text: string }[];
+  completedSteps: { number: number; text: string; summary?: string }[];
+  failedStepSummary?: string | null;
   note: string;
 };
 
@@ -482,7 +511,9 @@ function ScanPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
     <div className="grid gap-6 lg:grid-cols-5">
       <Card className="lg:col-span-2">
         <h2 className="text-lg font-semibold text-white">Scan a site</h2>
-        <p className="mt-1 text-sm text-slate-500">Crawl + AI test ideas + a few automated checks.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          MCP explores the live site, plans 6–10 E2E scenarios, generates Playwright tests, and runs them automatically.
+        </p>
         <label className="mt-6 block space-y-2">
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">URL</span>
           <input
@@ -530,7 +561,7 @@ function ScanPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
         {busy && (
           <div className="mt-8 flex flex-col items-center gap-3 text-slate-500">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
-            <p className="text-sm">Crawling and generating tests…</p>
+            <p className="text-sm">Exploring site (MCP) → generating Playwright suite → running E2E…</p>
           </div>
         )}
         {cases && (
@@ -605,13 +636,14 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [edge, setEdge] = useState<unknown[] | null>(null);
-  const [includeNegativeRun, setIncludeNegativeRun] = useState(true);
+  const [includeNegativeRun, setIncludeNegativeRun] = useState(false);
   const [lastRun, setLastRun] = useState<{
     passed: boolean;
     output: string;
     friendlyFailure: FriendlyFailure | null;
     report: FlowRunReportShape | null;
     flowName: string;
+    specPath?: string | null;
   } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -683,7 +715,12 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
 
   const copyRunReport = useCallback(async () => {
     if (!lastRun?.report) return;
-    const text = formatBugReportText(lastRun.flowName, lastRun.report, lastRun.passed);
+    const text = formatBugReportText(
+      lastRun.flowName,
+      lastRun.report,
+      lastRun.passed,
+      lastRun.friendlyFailure?.progress ?? null
+    );
     try {
       await navigator.clipboard.writeText(text);
       appendLog({ message: "Run report copied — paste into your bug tracker or email.", level: "success" });
@@ -697,13 +734,17 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
     const flowMeta = flows.find((x) => x.id === id);
     setBusy(true);
     setLastRun(null);
-    appendLog({ message: `Running flow ${id}${includeNegativeRun ? " (with negative checks)" : ""}…`, level: "step" });
+    appendLog({
+      message: `Running flow ${id}${includeNegativeRun ? " (happy path + positive & negative scenarios)" : " (happy path only)"}…`,
+      level: "step",
+    });
     try {
       const r = await api<{
         passed: boolean;
         output?: string;
         friendlyFailure?: FriendlyFailure | null;
         report?: FlowRunReportShape | null;
+        specPath?: string | null;
       }>(`/api/flows/${id}/run`, {
         method: "POST",
         json: {
@@ -717,6 +758,7 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
         friendlyFailure: r.friendlyFailure ?? null,
         report: r.report ?? null,
         flowName: flowMeta?.name || id,
+        specPath: r.specPath ?? null,
       });
       const rs = r.report?.summary;
       const tail =
@@ -828,7 +870,12 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
     <div className="grid gap-6 lg:grid-cols-2">
       <Card>
         <h2 className="text-lg font-semibold text-white">New flow</h2>
-        <p className="mt-1 text-sm text-slate-500">One action per line — plain English.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          One action per line — plain English. For flaky steps, add a Playwright locator:{" "}
+          <span className="font-mono text-slate-400">
+            Click Save &gt;&gt; getByRole(&apos;button&apos;, &#123; name: /save/i &#125;)
+          </span>
+        </p>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -894,9 +941,12 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                 onChange={(e) => setIncludeNegativeRun(e.target.checked)}
               />
               <span>
-                When you use <span className="text-slate-300">Run</span> on one flow, also run{" "}
-                <span className="text-slate-300">negative checks</span> (invalid inputs) and verify the app shows errors
-                or blocks bad data. <span className="text-slate-500">Run all</span> still runs happy paths only (faster).
+                When checked, <span className="text-slate-300">Run</span> also generates extra positive and negative
+                Playwright scenarios (~5–10 tests total). Leave unchecked for{" "}
+                <span className="text-slate-300">happy path only</span> (recommended while tuning a new flow).{" "}
+                <span className="text-slate-500">Run all</span> always runs happy paths only. While a test runs, open{" "}
+                <span className="text-slate-300">Activity</span> — live lines show each click and URL (
+                <span className="font-mono text-slate-500">graciousgarage.com/…</span>).
               </span>
             </label>
           </div>
@@ -1039,8 +1089,11 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                     </p>
                     <p className="mt-1 text-[11px] text-slate-500">
                       Happy path: {lastRun.report.summary.happyPassed ? "passed" : "failed"}
+                      {(lastRun.report.summary.positiveTotal ?? 0) > 0
+                        ? ` · Positive: ${lastRun.report.summary.positivePassed}/${lastRun.report.summary.positiveTotal}`
+                        : null}
                       {lastRun.report.summary.negativeTotal > 0
-                        ? ` · Negative scenarios: ${lastRun.report.summary.negativePassed}/${lastRun.report.summary.negativeTotal} passed`
+                        ? ` · Negative: ${lastRun.report.summary.negativePassed}/${lastRun.report.summary.negativeTotal}`
                         : null}
                     </p>
                   </div>
@@ -1058,8 +1111,9 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                     <thead className="sticky top-0 border-b border-white/10 bg-zinc-950/95 text-[10px] uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="p-2.5 font-medium">Type</th>
-                        <th className="p-2.5 font-medium">Check</th>
+                        <th className="p-2.5 font-medium">Test</th>
                         <th className="p-2.5 font-medium">Result</th>
+                        <th className="p-2.5 font-medium">Details</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1068,6 +1122,8 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                           <td className="whitespace-nowrap p-2.5 text-slate-500">
                             {c.kind === "negative" ? (
                               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200">Negative</span>
+                            ) : c.kind === "positive" ? (
+                              <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] text-violet-200">Positive</span>
                             ) : (
                               <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-200">Happy path</span>
                             )}
@@ -1084,6 +1140,15 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                               </span>
                             )}
                           </td>
+                          <td className="p-2.5 text-slate-400">
+                            {c.passed ? (
+                              <span className="text-slate-600">—</span>
+                            ) : (
+                              <span className="text-xs leading-relaxed">
+                                {c.plainSummary || "See technical log below."}
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1095,16 +1160,24 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                     invalid input — use the table and “Copy for bug report” when filing issues.
                   </p>
                 ) : null}
-                {!lastRun.passed
-                  ? lastRun.report.cases
-                      .filter((c) => !c.passed && c.errorMessage)
-                      .map((c, j) => (
-                        <p key={`${c.title}-${j}`} className="mt-2 font-mono text-[10px] leading-relaxed text-slate-500 break-words">
-                          <span className="text-slate-600">{c.title}: </span>
-                          {c.errorMessage}
-                        </p>
-                      ))
-                  : null}
+                {!lastRun.passed ? (
+                  <details className="mt-3 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2">
+                    <summary className="cursor-pointer text-xs text-slate-500">Technical log (for developers)</summary>
+                    <motion.div className="mt-2 space-y-2">
+                      {lastRun.report.cases
+                        .filter((c) => !c.passed && c.errorMessage)
+                        .map((c, j) => (
+                          <p
+                            key={`${c.title}-${j}`}
+                            className="font-mono text-[10px] leading-relaxed text-slate-500 break-words"
+                          >
+                            <span className="text-slate-400">{c.title}: </span>
+                            {c.errorMessage}
+                          </p>
+                        ))}
+                    </motion.div>
+                  </details>
+                ) : null}
               </div>
             ) : null}
             {lastRun.passed ? (
@@ -1113,8 +1186,8 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                 <div>
                   <p className="font-medium text-white">This flow finished successfully</p>
                   <p className="mt-1 text-xs text-slate-400">
-                    {lastRun.report && lastRun.report.summary.negativeTotal > 0
-                      ? `Happy path and all ${lastRun.report.summary.negativeTotal} negative scenarios passed.`
+                    {lastRun.report && lastRun.report.summary.total > 1
+                      ? `All ${lastRun.report.summary.total} checks passed (happy path${(lastRun.report.summary.positiveTotal ?? 0) > 0 ? ", positive" : ""}${lastRun.report.summary.negativeTotal > 0 ? ", negative" : ""} scenarios).`
                       : "The automated browser completed the generated test without errors."}
                   </p>
                 </div>
@@ -1131,9 +1204,9 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                         {lastRun.friendlyFailure.progress.completedSteps.length > 0 ? (
                           <ol className="mt-2 list-decimal space-y-1.5 pl-4 marker:text-emerald-500/90">
                             {lastRun.friendlyFailure.progress.completedSteps.map((s) => (
-                              <li key={s.number} className="pl-1">
-                                <span className="text-slate-500">Step {s.number} · </span>
-                                {s.text}
+                              <li key={s.number} className="pl-1 text-emerald-100/90">
+                                <span className="text-emerald-400/80">✓ </span>
+                                {s.summary || s.text}
                               </li>
                             ))}
                           </ol>
@@ -1142,11 +1215,16 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                         ) : null}
                         {lastRun.friendlyFailure.progress.failedAtStepNumber != null ? (
                           <p className="mt-3 border-t border-white/10 pt-2 font-medium text-rose-200/95">
-                            Stopped at step {lastRun.friendlyFailure.progress.failedAtStepNumber}
+                            <span className="text-rose-400/80">✗ </span>
+                            Failed at step {lastRun.friendlyFailure.progress.failedAtStepNumber}
                             {lastRun.friendlyFailure.progress.totalSteps != null
                               ? ` of ${lastRun.friendlyFailure.progress.totalSteps}`
                               : ""}
-                            {lastRun.friendlyFailure.progress.failedStepText ? (
+                            {lastRun.friendlyFailure.progress.failedStepSummary ? (
+                              <span className="mt-1 block font-normal text-slate-200">
+                                {lastRun.friendlyFailure.progress.failedStepSummary}
+                              </span>
+                            ) : lastRun.friendlyFailure.progress.failedStepText ? (
                               <span className="mt-1 block font-normal text-slate-300">
                                 {lastRun.friendlyFailure.progress.failedStepText}
                               </span>
@@ -1194,6 +1272,19 @@ function FlowsPanel({ appendLog }: { appendLog: (l: LogLine) => void }) {
                   {lastRun.friendlyFailure?.technical.waitingFor ? (
                     <p className="font-mono text-[10px] leading-relaxed text-slate-600 break-words">
                       Waiting for: {lastRun.friendlyFailure.technical.waitingFor}
+                    </p>
+                  ) : null}
+                  {lastRun.friendlyFailure?.technical.waitingFor?.includes("navigation") ? (
+                    <p className="text-[11px] leading-relaxed text-amber-200/95">
+                      That locator is from an old generated script. Restart the backend, click Run again (each run
+                      creates a new file). The updated script uses{" "}
+                      <span className="font-mono text-slate-300">clickTopNavLink(page, &apos;Decor&apos;)</span>, not{" "}
+                      <span className="font-mono text-slate-300">getByRole(&apos;navigation&apos;)</span>.
+                    </p>
+                  ) : null}
+                  {lastRun.specPath ? (
+                    <p className="font-mono text-[10px] text-slate-600 truncate" title={lastRun.specPath}>
+                      Script: {lastRun.specPath.replace(/^.*[/\\]/, "")}
                     </p>
                   ) : null}
                   {lastRun.output.trim().length > 0 ? (

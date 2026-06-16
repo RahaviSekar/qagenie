@@ -80,7 +80,7 @@ nextApp.prepare().then(() => {
     clients.add(res);
     req.on("close", () => clients.delete(res));
   });
-
+  console.log("GEMINI:", process.env.GEMINI_API_KEY ? "FOUND" : "MISSING");
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, gemini: Boolean(process.env.GEMINI_API_KEY) });
   });

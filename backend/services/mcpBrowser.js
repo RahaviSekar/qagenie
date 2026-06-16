@@ -1,4 +1,5 @@
 const { chromium } = require("playwright");
+const { resolveNavigationTarget } = require("./flowBaseUrl");
 
 class MCPBrowser {
   constructor() {
@@ -30,10 +31,16 @@ class MCPBrowser {
     return buf.toString("base64");
   }
 
-  async navigate(url) {
+  async navigate(url, options = {}) {
     const page = await this.ensurePage();
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
+    const target = resolveNavigationTarget(url, options.baseUrl);
+    await page.goto(target, { waitUntil: "networkidle", timeout: 30_000 });
     return this.screenshot();
+  }
+
+  async getCurrentUrl() {
+    const page = await this.ensurePage();
+    return page.url();
   }
 
   async getPageInfo() {
@@ -90,8 +97,17 @@ class MCPBrowser {
     const text = value == null ? "" : String(value);
     if (!field) throw new Error("fieldDescription is required");
     const re = new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const looksLikePassword =
+      /password|secure\s*access/i.test(field) || (text.length > 0 && !/\s/.test(text) && text.length >= 6);
 
     const candidates = [
+      ...(looksLikePassword
+        ? [
+            () => page.locator('input[type="password"]').first(),
+            () => page.getByLabel(/password/i).first(),
+            () => page.getByPlaceholder(/password/i).first(),
+          ]
+        : []),
       () => page.getByLabel(re).first(),
       () => page.getByPlaceholder(re).first(),
       () => page.locator(`input[placeholder*="${field}"]`).first(),

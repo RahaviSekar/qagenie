@@ -4,7 +4,8 @@ const fs = require("fs").promises;
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const mcpBrowser = require("../services/mcpBrowser");
-const { runUrlScan, runFlow } = require("../services/agentRunner");
+const { runUrlScanE2E } = require("../services/urlScanOrchestrator");
+const { runBusinessFlow } = require("../services/flowOrchestrator");
 const aiService = require("../services/aiService");
 const { resolveFlowBaseUrl } = require("../services/flowBaseUrl");
 const { log } = require("../services/logEmitter");
@@ -26,13 +27,13 @@ async function runRegression({ url, includeUrlScan, includeFlows, triggeredBy = 
     for (const flow of data.flows || []) {
       try {
         const baseUrl = resolveFlowBaseUrl(flow, url);
-        const mod = await runFlow(flow, baseUrl);
+        const mod = await runBusinessFlow(flow, baseUrl, { includeNegativeTests: false });
         flowResults.push({
           flowId: flow.id,
           name: flow.name,
           passed: mod.passed,
-          output: "",
-          friendlyFailure: null,
+          output: mod.output || "",
+          friendlyFailure: mod.friendlyFailure || null,
           screenshot: mod.screenshot || null,
         });
       } catch (e) {
@@ -48,7 +49,7 @@ async function runRegression({ url, includeUrlScan, includeFlows, triggeredBy = 
     } catch (e) {
       throw new Error("Invalid URL for regression scan");
     }
-    const scanRun = await runUrlScan(normalized);
+    const scanRun = await runUrlScanE2E(normalized);
     urlScanResults.push(...(scanRun.results || []));
   }
 
