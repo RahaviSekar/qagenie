@@ -2,9 +2,11 @@ node_modules/
 .next/
 package-lock.json
 .env
+.env.local
 *.log
 .DS_Store
 backend/data/snapshots/*
 !backend/data/snapshots/.gitkeep
 tmp/
 temp-specs/
+test-results/

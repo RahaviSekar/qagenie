@@ -441,6 +441,7 @@ function HealthPill() {
       .then((h) => setOk(Boolean(h.ok && h.gemini)))
       .catch(() => setOk(false));
   }, []);
+   
   if (ok === null) {
     return (
       <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400">
@@ -449,6 +450,7 @@ function HealthPill() {
       </span>
     );
   }
+  console.log("ok",ok);
   return (
     <span
       className={clsx(
