@@ -1,5 +1,6 @@
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
-const headed = String(process.env.PLAYWRIGHT_HEADED || "").toLowerCase() === "true";
+const headed =
+  String(process.env.PLAYWRIGHT_HEADED || "").toLowerCase() === "true";
 
 module.exports = {
   testDir: "./temp-specs",
@@ -18,7 +19,12 @@ module.exports = {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
     launchOptions: {
-      args: ["--disable-blink-features=AutomationControlled"],
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
     },
   },
 };
