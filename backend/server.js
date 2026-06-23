@@ -9,10 +9,16 @@ const regressionRoutes = require("./routes/regression");
 const { emitter } = require("./services/logEmitter");
 
 try {
-  execSync("npx playwright install chromium", { stdio: "inherit" });
+  execSync("npx playwright install chromium --with-deps", { stdio: "inherit" });
   console.log("Playwright chromium ready");
 } catch (e) {
-  console.error("Playwright install failed:", e.message);
+  // with-deps may fail on permissions, try without
+  try {
+    execSync("npx playwright install chromium", { stdio: "inherit" });
+    console.log("Playwright chromium ready (no deps)");
+  } catch (e2) {
+    console.error("Playwright install failed:", e2.message);
+  }
 }
 
 const dev = process.env.NODE_ENV !== "production";
