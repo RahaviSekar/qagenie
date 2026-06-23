@@ -4,7 +4,7 @@ const path = require("path");
 const { log } = require("./logEmitter");
 const { tryParsePlaywrightJsonReport, extractTestsFromPlaywrightJson } = require("./playwrightJsonReport");
 
-const projectRoot = path.join(__dirname, "..", "..");
+const projectRoot = path.join(__dirname, "..");
 
 /** Passed to Playwright as --timeout (per-test, ms). */
 function getTestTimeoutMs() {
@@ -102,11 +102,9 @@ function runPlaywrightSpec(specPath, opts = {}) {
       "step"
     );
     const usePnpm = fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"));
-    const cmd = usePnpm ? "pnpm" : "npx";
+    const cmd = "npx";
     const reporterArg = jsonReport ? "--reporter=json" : "--reporter=line";
-    const args = usePnpm
-      ? ["exec", "playwright", "test", testTarget, reporterArg, `--timeout=${testTimeoutMs}`, `--max-failures=${maxFailures}`]
-      : ["playwright", "test", testTarget, reporterArg, `--timeout=${testTimeoutMs}`, `--max-failures=${maxFailures}`];
+    const args = ["playwright", "test", testTarget, reporterArg, `--timeout=${testTimeoutMs}`, `--max-failures=${maxFailures}`];
     const proc = spawn(cmd, args, {
       cwd: projectRoot,
       shell: true,
