@@ -10,6 +10,7 @@ module.exports = {
   workers: 1,
   use: {
     headless: !headed,
+    browserName: "chromium",
     trace: "off",
     actionTimeout: 30_000,
     navigationTimeout: 60_000,

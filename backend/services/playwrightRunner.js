@@ -193,8 +193,9 @@ async function runTestCases(testCases, baseUrl) {
     return [];
   }
   log(`Running ${testCases.length} generated checks (best-effort)…`, "step");
-  const browser = await chromium.launch({
+ const browser = await chromium.launch({
   headless: true,
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
   args: [
     "--no-sandbox",
     "--disable-setuid-sandbox",
