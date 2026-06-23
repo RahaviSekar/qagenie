@@ -104,8 +104,6 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || "Server error" });
 });
 
-app.all("*", (req, res) => handle(req, res));
-
 http.createServer(app).listen(port, () => {
   console.log(
     `QA Genie → http://localhost:${port}  (${dev ? "dev" : "production"})`,
