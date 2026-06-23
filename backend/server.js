@@ -8,8 +8,14 @@ const flowsRoutes = require("./routes/flows");
 const regressionRoutes = require("./routes/regression");
 const { emitter } = require("./services/logEmitter");
 
+try {
+  execSync("npx playwright install chromium", { stdio: "inherit" });
+  console.log("Playwright chromium ready");
+} catch (e) {
+  console.error("Playwright install failed:", e.message);
+}
+
 const dev = process.env.NODE_ENV !== "production";
-console.log("dev", dev);
 const port = Number(process.env.PORT) || 3000;
 
 const clients = new Set();
