@@ -1,6 +1,7 @@
 require("dotenv").config();
 const http = require("http");
 const crypto = require("crypto");
+const { execSync } = require("child_process");
 const express = require("express");
 const cors = require("cors");
 const scanRoutes = require("./routes/scan");
