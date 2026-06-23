@@ -1,26 +1,12 @@
 require("dotenv").config();
 const http = require("http");
 const crypto = require("crypto");
-const { execSync } = require("child_process");
 const express = require("express");
 const cors = require("cors");
 const scanRoutes = require("./routes/scan");
 const flowsRoutes = require("./routes/flows");
 const regressionRoutes = require("./routes/regression");
 const { emitter } = require("./services/logEmitter");
-
-try {
-  execSync("npx playwright install chromium --with-deps", { stdio: "inherit" });
-  console.log("Playwright chromium ready");
-} catch (e) {
-  // with-deps may fail on permissions, try without
-  try {
-    execSync("npx playwright install chromium", { stdio: "inherit" });
-    console.log("Playwright chromium ready (no deps)");
-  } catch (e2) {
-    console.error("Playwright install failed:", e2.message);
-  }
-}
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT) || 3000;
