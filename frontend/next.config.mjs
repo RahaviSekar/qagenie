@@ -1,7 +1,4 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
-  serverExternalPackages: ["playwright", "@playwright/test", "playwright-core", "@google/generative-ai"],
-};
+const nextConfig = {};
 
 export default nextConfig;
