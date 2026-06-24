@@ -1,4 +1,5 @@
-const { chromium } = require("playwright");
+const chromium = require("@sparticuz/chromium-min");
+const { chromium: playwrightChromium } = require("playwright-core");
 const { log } = require("./logEmitter");
 
 /** Strip code samples and hints so natural-language intent stays. */
@@ -193,15 +194,19 @@ async function runTestCases(testCases, baseUrl) {
     return [];
   }
   log(`Running ${testCases.length} generated checks (best-effort)…`, "step");
- const browser = await chromium.launch({
-  headless: true,
-  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+  await chromium.executablePath(
+    process.env.SPARTICUZ_CHROMIUM_URL ||
+    "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar"
+  );
+
+const browser = await playwrightChromium.launch({
   args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
+    ...chromium.args,
     "--disable-blink-features=AutomationControlled",
   ],
+  executablePath: execPath,
+  headless: true,
 });
   const context = await browser.newContext({
     userAgent:

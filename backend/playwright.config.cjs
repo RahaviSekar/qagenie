@@ -19,12 +19,13 @@ module.exports = {
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
-    launchOptions: {
+   launchOptions: {
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
       args: [
-        "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
       ],
     },
   },
