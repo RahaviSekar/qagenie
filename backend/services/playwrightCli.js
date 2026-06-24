@@ -2,12 +2,12 @@ const { spawn, exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { log } = require("./logEmitter");
-const { tryParsePlaywrightJsonReport, extractTestsFromPlaywrightJson } = require("./playwrightJsonReport");
+const {
+  tryParsePlaywrightJsonReport,
+  extractTestsFromPlaywrightJson,
+} = require("./playwrightJsonReport");
 
 const projectRoot = path.join(__dirname, "..");
-const chromiumMin = require("@sparticuz/chromium-min");
-const CHROMIUM_URL = process.env.SPARTICUZ_CHROMIUM_URL ||
-  "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar";
 
 /** Passed to Playwright as --timeout (per-test, ms). */
 function getTestTimeoutMs() {
@@ -67,7 +67,8 @@ function killProcessTree(pid) {
 function runPlaywrightSpec(specPath, opts = {}) {
   const maxFailures = opts.maxFailures != null ? opts.maxFailures : 1;
   const jsonReport = Boolean(opts.jsonReport);
-  const testTimeoutMs = opts.testTimeoutMs != null ? opts.testTimeoutMs : getTestTimeoutMs();
+  const testTimeoutMs =
+    opts.testTimeoutMs != null ? opts.testTimeoutMs : getTestTimeoutMs();
   const runTimeoutMs =
     opts.runTimeoutMs != null
       ? opts.runTimeoutMs
@@ -102,30 +103,35 @@ function runPlaywrightSpec(specPath, opts = {}) {
     const testTarget = rel.includes(" ") ? `"${rel}"` : rel;
     log(
       `Playwright: up to ${Math.round(runTimeoutMs / 60_000)} min total, ${Math.round(testTimeoutMs / 1000)}s per test`,
-      "step"
+      "step",
     );
-    const usePnpm = fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"));
+
     const cmd = "npx";
     const reporterArg = jsonReport ? "--reporter=json" : "--reporter=line";
     const args = [
-  "playwright", "test", testTarget, reporterArg,
-  `--timeout=${testTimeoutMs}`,
-  `--max-failures=${maxFailures}`,
-];
-const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-  await chromiumMin.executablePath(CHROMIUM_URL);
+      "playwright",
+      "test",
+      testTarget,
+      reporterArg,
+      `--timeout=${testTimeoutMs}`,
+      `--max-failures=${maxFailures}`,
+    ];
+
     const proc = spawn(cmd, args, {
       cwd: projectRoot,
       shell: true,
       windowsHide: true,
       env: {
-    ...process.env,
-    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: execPath,
-  },
+        ...process.env,
+        PLAYWRIGHT_BROWSERS_PATH: "0",
+      },
     });
 
     timer = setTimeout(() => {
-      log(`Playwright run exceeded ${runTimeoutMs}ms — stopping process tree.`, "error");
+      log(
+        `Playwright run exceeded ${runTimeoutMs}ms — stopping process tree.`,
+        "error",
+      );
       try {
         proc.kill("SIGTERM");
       } catch (_) {}
@@ -178,7 +184,10 @@ const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
             log(`${ok ? "✓" : "✘"} ${row.title}`, ok ? "success" : "error");
           }
         } else {
-          log("Playwright JSON report could not be parsed; see combined output.", "error");
+          log(
+            "Playwright JSON report could not be parsed; see combined output.",
+            "error",
+          );
         }
       }
       done({
@@ -193,7 +202,8 @@ const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
       done({
         passed: false,
         exitCode: -1,
-        output: errChunks.join("") + outChunks.join("") + String(err.message || err),
+        output:
+          errChunks.join("") + outChunks.join("") + String(err.message || err),
         timedOut: false,
         testRows: null,
       });
