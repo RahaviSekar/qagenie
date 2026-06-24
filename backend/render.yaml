@@ -3,7 +3,7 @@ services:
     name: qa-genie-backend
     env: node
     rootDir: backend
-    buildCommand: npm install && npx playwright install chromium --with-deps
+    buildCommand: npm install
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -14,3 +14,5 @@ services:
         value: gemini-2.5-flash
       - key: FRONTEND_URL
         sync: false
+      - key: SPARTICUZ_CHROMIUM_URL
+        value: https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar

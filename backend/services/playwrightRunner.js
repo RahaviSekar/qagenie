@@ -42,10 +42,16 @@ async function clickByLinkOrButtonName(page, nameFragment) {
     .first()
     .click({ timeout: 12_000 })
     .catch(async () => {
-      await page.getByRole("button", { name: re }).first().click({ timeout: 12_000 });
+      await page
+        .getByRole("button", { name: re })
+        .first()
+        .click({ timeout: 12_000 });
     })
     .catch(async () => {
-      await page.getByText(nameFragment, { exact: false }).first().click({ timeout: 12_000 });
+      await page
+        .getByText(nameFragment, { exact: false })
+        .first()
+        .click({ timeout: 12_000 });
     });
 }
 
@@ -59,8 +65,13 @@ async function runStep(page, step, baseUrl) {
   const raw = sanitizeStep(rawOriginal);
   const { s } = parseStep(raw, baseUrl);
 
-  if (/^navigate to |^go to |^visit |^open |^goto /.test(s) || s.startsWith("goto ")) {
-    let target = raw.replace(/^(navigate to|go to|visit|open|goto)\s*/i, "").trim();
+  if (
+    /^navigate to |^go to |^visit |^open |^goto /.test(s) ||
+    s.startsWith("goto ")
+  ) {
+    let target = raw
+      .replace(/^(navigate to|go to|visit|open|goto)\s*/i, "")
+      .trim();
     if (!/^https?:\/\//i.test(target)) {
       target = new URL(target.replace(/^\/+/, "/"), baseUrl).href;
     }
@@ -68,19 +79,28 @@ async function runStep(page, step, baseUrl) {
     return;
   }
 
-  if (/wait for (the )?page to (load|finish)/i.test(raw) || (s.includes("wait") && s.includes("load"))) {
+  if (
+    /wait for (the )?page to (load|finish)/i.test(raw) ||
+    (s.includes("wait") && s.includes("load"))
+  ) {
     await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
     return;
   }
 
-  if (s.includes("press enter") || s.includes("hit enter") || /\bsubmit (the )?search\b/i.test(raw)) {
+  if (
+    s.includes("press enter") ||
+    s.includes("hit enter") ||
+    /\bsubmit (the )?search\b/i.test(raw)
+  ) {
     await page.keyboard.press("Enter");
-    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+    await page
+      .waitForLoadState("domcontentloaded", { timeout: 15_000 })
+      .catch(() => {});
     return;
   }
 
   const typeQuoted = raw.match(
-    /^(?:type|enter)\s+[\u2018\u2019'"]([^\u2018\u2019'"]+)[\u2018\u2019'"]\s+into/i
+    /^(?:type|enter)\s+[\u2018\u2019'"]([^\u2018\u2019'"]+)[\u2018\u2019'"]\s+into/i,
   );
   if (typeQuoted) {
     await fillMainSearchLikeField(page, typeQuoted[1]);
@@ -88,7 +108,7 @@ async function runStep(page, step, baseUrl) {
   }
 
   const typeLoose = raw.match(
-    /^(?:type|enter)\s+(.+?)\s+into\s+(?:the\s+)?(?:main\s+)?(?:search\s+)?(?:input|field|box|textarea)/i
+    /^(?:type|enter)\s+(.+?)\s+into\s+(?:the\s+)?(?:main\s+)?(?:search\s+)?(?:input|field|box|textarea)/i,
   );
   if (typeLoose) {
     let val = typeLoose[1].trim();
@@ -100,7 +120,7 @@ async function runStep(page, step, baseUrl) {
 
   if (
     /clear\s+(the\s+)?(search|field|input|box)|empty\s+(the\s+)?(search|query|field)|ensure\s+(the\s+)?search.*empty|field\s+is\s+empty/i.test(
-      raw
+      raw,
     )
   ) {
     await fillMainSearchLikeField(page, "");
@@ -111,14 +131,21 @@ async function runStep(page, step, baseUrl) {
   if (fillMatch) {
     const field = fillMatch[1].trim();
     const value = fillMatch[2].replace(/['"]$/g, "").trim();
-    await page.getByLabel(new RegExp(escapeRe(field), "i")).fill(value, { timeout: 8000 }).catch(async () => {
-      await page.getByPlaceholder(new RegExp(escapeRe(field), "i")).fill(value, { timeout: 8000 });
-    });
+    await page
+      .getByLabel(new RegExp(escapeRe(field), "i"))
+      .fill(value, { timeout: 8000 })
+      .catch(async () => {
+        await page
+          .getByPlaceholder(new RegExp(escapeRe(field), "i"))
+          .fill(value, { timeout: 8000 });
+      });
     return;
   }
 
   if (/click/i.test(raw) && /with text|link with|named/i.test(raw)) {
-    const m = raw.match(/with text\s+(.+?)(?:\s*\(|\s*$)/i) || raw.match(/named\s+(.+?)(?:\s*\(|\s*$)/i);
+    const m =
+      raw.match(/with text\s+(.+?)(?:\s*\(|\s*$)/i) ||
+      raw.match(/named\s+(.+?)(?:\s*\(|\s*$)/i);
     if (m && m[1]) {
       const label = m[1].replace(/['"]/g, "").trim();
       if (label.length > 0 && label.length < 120) {
@@ -137,14 +164,20 @@ async function runStep(page, step, baseUrl) {
     const short = label.match(/['"]([^'"]+)['"]/);
     if (short) label = short[1];
     if (label.length > 100) label = label.slice(0, 80);
-    await page.getByRole("button", { name: new RegExp(escapeRe(label), "i") }).first().click({ timeout: 10_000 }).catch(async () => {
-      await clickByLinkOrButtonName(page, label);
-    });
+    await page
+      .getByRole("button", { name: new RegExp(escapeRe(label), "i") })
+      .first()
+      .click({ timeout: 10_000 })
+      .catch(async () => {
+        await clickByLinkOrButtonName(page, label);
+      });
     return;
   }
 
   if (s.includes("wait") && (s.includes("network") || s.includes("idle"))) {
-    await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => {});
+    await page
+      .waitForLoadState("networkidle", { timeout: 12_000 })
+      .catch(() => {});
     return;
   }
 
@@ -165,15 +198,25 @@ async function runStep(page, step, baseUrl) {
       const want = parseInt(wantM[1], 10);
       const count = await page.locator("input, textarea, select").count();
       if (count !== want) {
-        throw new Error(`Expected about ${want} fields on page, found ${count} (counts vary by locale — prefer softer assertions in AI output).`);
+        throw new Error(
+          `Expected about ${want} fields on page, found ${count} (counts vary by locale — prefer softer assertions in AI output).`,
+        );
       }
       return;
     }
   }
 
-  if (s.includes("visible") || (s.includes("assert") && /see|shown|displayed|present/i.test(raw))) {
+  if (
+    s.includes("visible") ||
+    (s.includes("assert") && /see|shown|displayed|present/i.test(raw))
+  ) {
     const m = raw.match(/['"]([^'"]+)['"]/);
-    const txt = m ? m[1] : raw.replace(/^assert:?\s*/i, "").replace(/^(that|the)\s+/i, "").trim();
+    const txt = m
+      ? m[1]
+      : raw
+          .replace(/^assert:?\s*/i, "")
+          .replace(/^(that|the)\s+/i, "")
+          .trim();
     if (txt.length > 2 && txt.length < 200) {
       const loc = page.getByText(txt, { exact: false }).first();
       await loc.waitFor({ state: "visible", timeout: 10_000 });
@@ -181,12 +224,20 @@ async function runStep(page, step, baseUrl) {
     }
   }
 
-  if (/^assert:/i.test(raw.trim()) && /form|structure|json|schema|specified in/i.test(raw)) {
-    log("Skipping non-executable structural assert (runner limitation).", "info");
+  if (
+    /^assert:/i.test(raw.trim()) &&
+    /form|structure|json|schema|specified in/i.test(raw)
+  ) {
+    log(
+      "Skipping non-executable structural assert (runner limitation).",
+      "info",
+    );
     return;
   }
 
-  throw new Error(`Could not interpret step: ${rawOriginal.slice(0, 200)}${rawOriginal.length > 200 ? "…" : ""}`);
+  throw new Error(
+    `Could not interpret step: ${rawOriginal.slice(0, 200)}${rawOriginal.length > 200 ? "…" : ""}`,
+  );
 }
 
 async function runTestCases(testCases, baseUrl) {
@@ -194,20 +245,18 @@ async function runTestCases(testCases, baseUrl) {
     return [];
   }
   log(`Running ${testCases.length} generated checks (best-effort)…`, "step");
-const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-  await chromium.executablePath(
-    process.env.SPARTICUZ_CHROMIUM_URL ||
-    "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar"
-  );
+  const execPath =
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+    (await chromium.executablePath(
+      process.env.SPARTICUZ_CHROMIUM_URL ||
+        "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar",
+    ));
 
-const browser = await playwrightChromium.launch({
-  args: [
-    ...chromium.args,
-    "--disable-blink-features=AutomationControlled",
-  ],
-  executablePath: execPath,
-  headless: true,
-});
+  const browser = await playwrightChromium.launch({
+    args: [...chromium.args, "--disable-blink-features=AutomationControlled"],
+    executablePath: execPath,
+    headless: true,
+  });
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -220,7 +269,10 @@ const browser = await playwrightChromium.launch({
     for (const tc of testCases) {
       const start = Date.now();
       try {
-        await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+        await page.goto(baseUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 20_000,
+        });
         const steps = Array.isArray(tc.steps) ? tc.steps : [];
         for (const st of steps) {
           await runStep(page, st, baseUrl);

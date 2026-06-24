@@ -5,6 +5,9 @@ const { log } = require("./logEmitter");
 const { tryParsePlaywrightJsonReport, extractTestsFromPlaywrightJson } = require("./playwrightJsonReport");
 
 const projectRoot = path.join(__dirname, "..");
+const chromiumMin = require("@sparticuz/chromium-min");
+const CHROMIUM_URL = process.env.SPARTICUZ_CHROMIUM_URL ||
+  "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar";
 
 /** Passed to Playwright as --timeout (per-test, ms). */
 function getTestTimeoutMs() {
@@ -104,11 +107,21 @@ function runPlaywrightSpec(specPath, opts = {}) {
     const usePnpm = fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"));
     const cmd = "npx";
     const reporterArg = jsonReport ? "--reporter=json" : "--reporter=line";
-    const args = ["playwright", "test", testTarget, reporterArg, `--timeout=${testTimeoutMs}`, `--max-failures=${maxFailures}`];
+    const args = [
+  "playwright", "test", testTarget, reporterArg,
+  `--timeout=${testTimeoutMs}`,
+  `--max-failures=${maxFailures}`,
+];
+const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+  await chromiumMin.executablePath(CHROMIUM_URL);
     const proc = spawn(cmd, args, {
       cwd: projectRoot,
       shell: true,
       windowsHide: true,
+      env: {
+    ...process.env,
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: execPath,
+  },
     });
 
     timer = setTimeout(() => {
