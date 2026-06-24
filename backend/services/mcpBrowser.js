@@ -1,4 +1,4 @@
-const { chromium } = require("playwright");
+const { chromium } = require("playwright-core");
 const { resolveNavigationTarget } = require("./flowBaseUrl");
 
 class MCPBrowser {
@@ -10,8 +10,24 @@ class MCPBrowser {
 
   async launch() {
     if (this.browser && this.page) return;
-    const headless = String(process.env.MCP_HEADLESS || "true").toLowerCase() !== "false";
-    this.browser = await chromium.launch({ headless });
+    const headless =
+      String(process.env.MCP_HEADLESS || "true").toLowerCase() !== "false";
+    const chromiumMin = require("@sparticuz/chromium-min");
+    const executablePath =
+      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+      (await chromiumMin.executablePath(
+        process.env.SPARTICUZ_CHROMIUM_URL ||
+          "https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar",
+      ));
+    this.browser = await chromium.launch({
+      headless,
+      executablePath,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+    });
     this.context = await this.browser.newContext({
       viewport: { width: 1440, height: 900 },
       locale: "en-US",
@@ -57,8 +73,11 @@ class MCPBrowser {
     const q = String(description || "").trim();
     if (!q) throw new Error("click description is required");
     // Extract core text by removing common suffixes
-    const core = q.replace(/\s+(button|link|icon)$/i, '');
-    const roleRegex = new RegExp(core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const core = q.replace(/\s+(button|link|icon)$/i, "");
+    const roleRegex = new RegExp(
+      core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "i",
+    );
 
     const candidates = [
       () => page.getByRole("button", { name: roleRegex }).first(),
@@ -98,7 +117,8 @@ class MCPBrowser {
     if (!field) throw new Error("fieldDescription is required");
     const re = new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     const looksLikePassword =
-      /password|secure\s*access/i.test(field) || (text.length > 0 && !/\s/.test(text) && text.length >= 6);
+      /password|secure\s*access/i.test(field) ||
+      (text.length > 0 && !/\s/.test(text) && text.length >= 6);
 
     const candidates = [
       ...(looksLikePassword
@@ -129,7 +149,8 @@ class MCPBrowser {
 
     return {
       success: false,
-      error: (lastError && lastError.message) || `Could not fill field: ${field}`,
+      error:
+        (lastError && lastError.message) || `Could not fill field: ${field}`,
       screenshot: await this.screenshot(),
     };
   }
