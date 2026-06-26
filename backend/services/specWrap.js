@@ -15,17 +15,17 @@ function stripPlaywrightImports(code) {
 function stripLeadingPlaywrightRequire(code) {
   return String(code || "")
     .replace(/^\s*const\s*\{\s*test\s*,\s*expect\s*\}\s*=\s*require\(\s*['"]@playwright\/test['"]\s*\)\s*;?\s*\n?/im, "")
+    .replace(/^\s*const\s*\{\s*test\s*,\s*expect\s*\}\s*=\s*require\(\s*['"]playwright-core\/lib\/test['"]\s*\)\s*;?\s*\n?/im, "")
     .trim();
 }
-
 function wrapPlaywrightSpec(flowName, code) {
   let body = stripPlaywrightImports(code);
   const hasTestFn = /\btest\s*\(/.test(body);
   if (!hasTestFn) {
     body = `test(${JSON.stringify(flowName)}, async ({ page }) => {\n${body}\n});`;
   }
-  if (!/\brequire\s*\(\s*['"]@playwright\/test['"]\s*\)/.test(body)) {
-    body = `const { test, expect } = require('@playwright/test');\n${body}`;
+  if (!/\brequire\s*\(\s*['"]playwright-core\/lib\/test['"]\s*\)/.test(body)) {
+    body = `const { test, expect } = require('playwright-core/lib/test');\n${body}`;
   }
   return body;
 }
@@ -45,7 +45,7 @@ function combineHappyAndNegative(flowLabel, happyCode, negativeCode) {
     h = h.replace(/\btest\s*\(\s*['"]([^'"]*)['"]\s*,/, `test(${JSON.stringify(happyTitle)},`);
   }
   let n = stripLeadingPlaywrightRequire(stripPlaywrightImports(stripAiPlaywrightCode(negativeCode || "")));
-  const body = `const { test, expect } = require('@playwright/test');\n\n${h}\n\n${n}\n`;
+  const body = `const { test, expect } = require('playwright-core/lib/test');\n\n${h}\n\n${n}\n`;
   return body;
 }
 
